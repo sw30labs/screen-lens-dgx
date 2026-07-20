@@ -816,8 +816,8 @@ def test_generic_qwen_ocr_keeps_verbatim_prompt_and_sampler(monkeypatch, tmp_pat
     payload = captured["payload"]
     assert [message["role"] for message in payload["messages"]] == ["system", "user"]
     assert payload["messages"][1]["content"][0]["type"] == "text"
-    assert payload["repetition_penalty"] == 1.15
-    assert payload["no_repeat_ngram_size"] == 6
+    assert payload["repetition_penalty"] == 1.30
+    assert payload["no_repeat_ngram_size"] == 8
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
 
 

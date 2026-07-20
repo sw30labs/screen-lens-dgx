@@ -467,11 +467,19 @@ class OCRConfig(BaseModel):
     )
 
     repetition_penalty: float = Field(
-        default=1.15,
-        description="Guards against the documented VLM-OCR repetition-loop failure on symbol runs",
+        default=1.30,
+        description=(
+            "Guards against VLM-OCR repetition loops on symbol runs "
+            "(progress bars, underlines). 1.15–1.28 still blow up on dense "
+            "terminal screenshots with Qwen3.6; 1.30 stops █-run blowups"
+        ),
     )
     no_repeat_ngram_size: int = Field(
-        default=6, description="Block verbatim n-gram loops (0 disables)"
+        default=8,
+        description=(
+            "Block verbatim n-gram loops (0 disables). Paired with "
+            "repetition_penalty=1.30 for progress-bar and separator runs"
+        ),
     )
     concurrency: int = Field(
         default_factory=default_inference_concurrency,

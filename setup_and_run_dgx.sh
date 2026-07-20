@@ -926,12 +926,15 @@ from src.config import OCRConfig
 from src.ocr import VerbatimOCR
 
 image_path, base_url, model, api_key, context_size = sys.argv[1:]
+# Match production OCRConfig's 600s HTTP budget. Cap max_tokens below the
+# production 16K ceiling so the smoke fixture cannot monopolize decode for the
+# full wait window; the path still exercises VerbatimOCR end-to-end.
 config = OCRConfig(
     backend="vllm",
     base_url=base_url,
     model=model,
     api_key=api_key,
-    timeout_seconds=180.0,
+    timeout_seconds=600.0,
     max_tokens=min(4096, int(context_size)),
     concurrency=1,
 )
