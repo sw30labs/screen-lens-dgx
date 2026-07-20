@@ -13,6 +13,8 @@ This repository is the **DGX-only fork** of dual-platform `screen-lens`. Default
 
 ## Demo
 
+![ScreenLens TUI on DGX Spark](assets/tui-main.png)
+
 ![ScreenLens ingestion pipeline](assets/ingest-demo.png)
 
 ## Architecture
