@@ -1,0 +1,30 @@
+[project]
+name = "screenlens-dgx"
+version = "0.2.0"
+description = "ScreenLens-DGX — Local video scene intelligence for NVIDIA DGX Spark (vLLM + CUDA)"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.4",
+    "langchain>=0.3",
+    "langchain-ollama>=0.3",
+    "langchain-community>=0.3",
+    "chromadb>=0.6",
+    "open-clip-torch>=2.29",
+    "opencv-python-headless>=4.10",
+    "scikit-image>=0.24",
+    "Pillow>=10.0",
+    "numpy>=1.26",
+    "torch>=2.4",
+    "tqdm>=4.66",
+    "typer>=0.12",
+    "rich>=13.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24", "pyyaml>=6.0"]
+tui = ["textual>=0.80"]
+all = ["textual>=0.80"]
+
+[project.scripts]
+screenlens = "src.cli:app"

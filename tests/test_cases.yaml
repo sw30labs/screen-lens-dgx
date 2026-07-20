@@ -1,0 +1,244 @@
+# ScreenLens end-to-end scenarios.
+#
+# The test helper can load this file as YAML metadata; the commands are also
+# suitable for a human or computer-use agent. They intentionally avoid fixed
+# output names because ingest/run/transcribe create timestamped folders.
+
+pipeline:
+  name: "ScreenLens-DGX — Local Video Scene Intelligence"
+  version: "0.2.0"
+
+inputs:
+  video_file: "input-videos/test.mov"
+  description: "A short screen recording with visible terminal or application text"
+  dgx_smoke_image: "assets/ingest-demo.png"
+  dgx_smoke_expected_text: "test.mov"
+  output_glob: "data/test_????????_??????"
+
+platform_defaults:
+  dgx_spark:
+    match:
+      system: "Linux"
+      machine: ["aarch64", "arm64"]
+    inference_backend: "vllm"
+    embedding_device: "cuda"
+    image_concurrency: 2
+    caption_max_tokens: 32768
+    model: "Qwen/Qwen3.6-27B-FP8"
+
+# Valid partial ScreenLensConfig payloads for config-file or agent-generated
+# tests. Provider fields use the names defined in src/config.py.
+configs:
+  dgx_fast:
+    description: "Small DGX ingestion while exercising vLLM vision and CUDA CLIP"
+    frame_extraction:
+      strategy: "fixed_fps"
+      fps: 0.2
+      max_dimension: 640
+    captioning:
+      backend: "vllm"
+      vllm_base_url: "http://127.0.0.1:8000/v1"
+      vllm_model: "Qwen/Qwen3.6-27B-FP8"
+      vllm_api_key: "local"
+      vllm_model_context: 262144
+      max_tokens: 32768
+      batch_size: 2
+    embedding:
+      model_name: "ViT-B-32"
+      device: "cuda"
+    ocr:
+      backend: "vllm"
+      base_url: "http://127.0.0.1:8000/v1"
+      model: "Qwen/Qwen3.6-27B-FP8"
+      concurrency: 2
+    reconstruction:
+      backend: "vllm"
+      base_url: "http://127.0.0.1:8000/v1"
+      model: "Qwen/Qwen3.6-27B-FP8"
+
+
+test_cases:
+  - id: "TC-UNIT-001"
+    name: "Offline Python suite"
+    category: "unit"
+    platforms: ["dgx_spark"]
+    command: "pytest tests/ -v"
+    expected:
+      exit_code: 0
+
+  - id: "TC-DGX-001"
+    name: "DGX host and service preflight"
+    category: "deployment"
+    platforms: ["dgx_spark"]
+    command: "./setup_and_run_dgx.sh doctor"
+    expected:
+      exit_code: 0
+      output_contains:
+        - "Linux detected"
+        - "ARM64 host detected"
+        - "NVIDIA GB10 GPU detected"
+        - "doctor passed"
+
+  - id: "TC-DGX-002"
+    name: "Pinned CUDA and OpenCLIP environment"
+    category: "deployment"
+    platforms: ["dgx_spark"]
+    command: "./setup_and_run_dgx.sh setup"
+    expected:
+      exit_code: 0
+      output_contains:
+        - "CUDA/OpenCLIP preflight passed"
+        - "torch 2.11.0+cu130"
+        - "torchvision 0.26.0+cu130"
+        - "setup complete"
+
+  - id: "TC-DGX-003"
+    name: "Exact-model discovery"
+    category: "inference"
+    platforms: ["dgx_spark"]
+    command: "./setup_and_run_dgx.sh run models"
+    expected:
+      exit_code: 0
+      output_contains:
+        - "Qwen/Qwen3.6-27B-FP8"
+        - "yes (vision)"
+
+  - id: "TC-DGX-004"
+    name: "Application-level multimodal smoke"
+    category: "inference"
+    platforms: ["dgx_spark"]
+    description: "Uses ScreenLens InferenceClient, not curl, to read the tracked screenshot."
+    command: "./setup_and_run_dgx.sh smoke"
+    expected:
+      exit_code: 0
+      output_contains:
+        - "ScreenLens vision smoke passed"
+        - "read test.mov"
+
+  - id: "TC-DGX-010"
+    name: "Timestamped DGX ingestion"
+    category: "ingestion"
+    platforms: ["dgx_spark"]
+    command: >-
+      ./setup_and_run_dgx.sh run ingest "{video_file}"
+      --strategy fixed_fps --fps 0.2 --batch-size 2 --device cuda
+    timeout_seconds: 900
+    expected:
+      exit_code: 0
+      output_contains:
+        - "ScreenLens — Video Ingestion"
+        - "Captioning with vllm"
+        - "Ingestion complete"
+      output_directory_pattern: "data/test_????????_??????"
+      data_created_relative_to_output:
+        - "frames/"
+        - "captions/all_captions.json"
+        - "chromadb/"
+
+  - id: "TC-DGX-011"
+    name: "Latest timestamped ingestion has usable captions"
+    category: "ingestion"
+    platforms: ["dgx_spark"]
+    command: >-
+      .venv-dgx/bin/python -c
+      "import json; from pathlib import Path;
+      roots=sorted(p for p in Path('data').glob('test_????????_??????') if p.is_dir());
+      assert roots, 'no timestamped test output';
+      rows=json.loads((roots[-1]/'captions'/'all_captions.json').read_text());
+      assert rows and all(len(str(r.get('caption','')).strip()) > 20 for r in rows[:5]);
+      assert all('[Error' not in str(r.get('caption','')) for r in rows[:5]);
+      print('CAPTIONS_OK', roots[-1], len(rows))"
+    expected:
+      exit_code: 0
+      output_contains: ["CAPTIONS_OK"]
+
+  - id: "TC-DGX-020"
+    name: "Semantic search and local summary"
+    category: "search"
+    platforms: ["dgx_spark"]
+    command: >-
+      ./setup_and_run_dgx.sh run search
+      "What application, terminal command, or workflow is shown?"
+      --data-dir ./data --top-k 5 --device cuda
+    expected:
+      exit_code: 0
+      output_contains:
+        - "Score"
+        - "Caption"
+        - "Summary"
+
+  - id: "TC-DGX-030"
+    name: "Verbatim transcription through vLLM"
+    category: "transcription"
+    platforms: ["dgx_spark"]
+    command: >-
+      ./setup_and_run_dgx.sh run transcribe "{video_file}"
+      --backend vllm
+      --inference-model Qwen/Qwen3.6-27B-FP8
+      --sample-fps 0.5
+    timeout_seconds: 900
+    expected:
+      exit_code: 0
+      output_contains:
+        - "ScreenLens — Verbatim Transcription"
+        - "OCR (vision): Qwen/Qwen3.6-27B-FP8"
+        - "Done in"
+      data_created_relative_to_output:
+        - "ocr/all_ocr.json"
+        - "output/transcript.raw.md"
+        - "output/transcript.md"
+        - "output/transcribe_meta.json"
+
+  - id: "TC-COMPAT-001"
+    name: "Provider-neutral and vLLM flag aliases remain accepted"
+    category: "compatibility"
+    platforms: ["dgx_spark"]
+    command: >-
+      python -m src.cli models --backend vllm
+      --vllm-url http://127.0.0.1:8000/v1
+    expected:
+      exit_code: 0
+      output_contains: ["vllm models"]
+
+agent_script:
+  name: "ScreenLens DGX Spark End-to-End Validation"
+  description: "Deterministic deployment checks followed by a small real pipeline run"
+  platform: "dgx_spark"
+  pre_conditions:
+    - "Run from the ScreenLens repository root on DGX Spark."
+    - "input-videos/test.mov exists and is a short recording with visible text."
+    - "Docker and NVIDIA Container Toolkit are configured."
+    - "HF_TOKEN is available if no exact-model vLLM service is already ready."
+  steps:
+    - step: 1
+      action: "Validate the host and reuse/start conditions"
+      command: "./setup_and_run_dgx.sh doctor"
+      verify: "doctor passed"
+    - step: 2
+      action: "Create or repair the checked CUDA environment"
+      command: "./setup_and_run_dgx.sh setup"
+      verify: "CUDA/OpenCLIP preflight passed"
+    - step: 3
+      action: "Start or reuse the exact NVIDIA Qwen service"
+      command: "./setup_and_run_dgx.sh llm-up"
+      verify: "the exact-model endpoint is ready"
+    - step: 4
+      action: "Prove the model processes images through ScreenLens"
+      command: "./setup_and_run_dgx.sh smoke"
+      verify: "ScreenLens vision smoke passed and read test.mov"
+    - step: 5
+      action: "Run a bounded real ingestion"
+      command: >-
+        ./setup_and_run_dgx.sh run ingest input-videos/test.mov
+        --strategy fixed_fps --fps 0.2 --batch-size 2 --device cuda
+      verify: "a new data/test_YYYYMMDD_HHMMSS directory contains captions and ChromaDB data"
+    - step: 6
+      action: "Search and summarize through the same local backend"
+      command: >-
+        ./setup_and_run_dgx.sh run search "What is shown?"
+        --data-dir ./data --top-k 5 --device cuda
+      verify: "the command displays ranked captions and a Summary panel"
+  post_conditions:
+    - "A timestamped data/test_* folder contains frames, captions, and a ChromaDB collection."
+    - "No generated video, frame, model, cache, database, or .env file is staged in Git."
+    - "An externally owned DigitalTwin vLLM service remains running and unmanaged by ScreenLens."

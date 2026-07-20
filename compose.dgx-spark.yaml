@@ -1,0 +1,116 @@
+name: screen-lens-dgx-spark
+
+services:
+  llm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai@sha256:e4f88a835143cd22aee2397a26ec6bb80b3a4a6fe0c882bcbc63822904766089}
+    platform: linux/arm64
+    # Start vLLM only through setup_and_run_dgx.sh; do not auto-start on reboot.
+    restart: "no"
+    init: true
+    ipc: host
+    gpus: all
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:?Set HF_TOKEN in the environment or private .env file}
+      # Standard Hub HTTP is resumable and avoids intermittent authenticated
+      # Xet CAS failures observed on DGX Spark.
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+    volumes:
+      - type: bind
+        source: ${DGX_HF_CACHE:-/home/spider/models/huggingface}
+        target: /root/.cache/huggingface
+      - type: bind
+        source: ${DGX_VLLM_CACHE:-/home/spider/models/.cache/vllm}
+        target: /root/.cache/vllm
+    command:
+      - ${VLLM_MODEL:-Qwen/Qwen3.6-27B-FP8}
+      - --revision
+      - ${VLLM_MODEL_REVISION:-e89b16ebf1988b3d6befa7de50abc2d76f26eb09}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --tensor-parallel-size
+      - "1"
+      - --trust-remote-code
+      - --kv-cache-dtype
+      - "${VLLM_KV_CACHE_DTYPE:-auto}"
+      - --attention-backend
+      - flashinfer
+      - --quantization
+      - "${VLLM_QUANTIZATION:-fp8}"
+      - --gpu-memory-utilization
+      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.45}"
+      - --max-model-len
+      - "${VLLM_MAX_MODEL_LEN:-262144}"
+      - --max-num-seqs
+      - "2"
+      - --max-num-batched-tokens
+      - "8192"
+      - --enable-chunked-prefill
+      - --async-scheduling
+      - --enable-prefix-caching
+      - --speculative-config
+      - '{"method":"mtp","num_speculative_tokens":2}'
+      - --load-format
+      - fastsafetensors
+      - --reasoning-parser
+      - qwen3
+      - --tool-call-parser
+      - qwen3_xml
+      - --enable-auto-tool-choice
+
+  ocr:
+    image: ${OCR_VLLM_IMAGE:-vllm/vllm-openai@sha256:e4f88a835143cd22aee2397a26ec6bb80b3a4a6fe0c882bcbc63822904766089}
+    platform: linux/arm64
+    # Optional second endpoint. The default OCR route reuses the shared llm
+    # service on port 8000 and does not start this container.
+    restart: "no"
+    init: true
+    ipc: host
+    gpus: all
+    ports:
+      - "127.0.0.1:8001:8001"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      HF_TOKEN: ${HF_TOKEN:?Set HF_TOKEN in the environment or private .env file}
+      HF_HUB_DISABLE_XET: ${HF_HUB_DISABLE_XET:-1}
+    volumes:
+      - type: bind
+        source: ${DGX_HF_CACHE:-/home/spider/models/huggingface}
+        target: /root/.cache/huggingface
+      - type: bind
+        source: ${DGX_VLLM_CACHE:-/home/spider/models/.cache/vllm}
+        target: /root/.cache/vllm
+    command:
+      - ${OCR_MODEL:-Qwen/Qwen3.6-27B-FP8}
+      - --revision
+      - ${OCR_MODEL_REVISION:-e89b16ebf1988b3d6befa7de50abc2d76f26eb09}
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8001"
+      - --tensor-parallel-size
+      - "1"
+      - --trust-remote-code
+      - --kv-cache-dtype
+      - "${VLLM_KV_CACHE_DTYPE:-auto}"
+      - --attention-backend
+      - flashinfer
+      - --quantization
+      - "${VLLM_QUANTIZATION:-fp8}"
+      - --gpu-memory-utilization
+      - "${OCR_GPU_MEMORY_UTILIZATION:-0.45}"
+      - --max-model-len
+      - "${OCR_MAX_MODEL_LEN:-262144}"
+      - --max-num-seqs
+      - "${OCR_MAX_NUM_SEQS:-2}"
+      - --max-num-batched-tokens
+      - "${OCR_MAX_NUM_BATCHED_TOKENS:-8192}"
+      - --enable-chunked-prefill
+      - --limit-mm-per-prompt
+      - '{"image":1}'
+      - --async-scheduling
+      - --enable-prefix-caching
